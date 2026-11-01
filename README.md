@@ -70,7 +70,7 @@ Download the latest version from [GitHub Releases](../../releases).
 
 ## License
 
-AUREON is distributed under the MIT License. See [LICENSE](LICENSE) for details.
+AUREON is distributed under the MIT License. See [LICENSE]([LICENSE](https://github.com/CapitanSashko/AUREON/blob/main/MP3/LICENSE)) for details.
 
 ## Author
 
