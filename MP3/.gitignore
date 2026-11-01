@@ -1,0 +1,32 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+
+# NuGet
+*.nupkg
+.nuget/
+
+# Temporary files
+[Tt]emp/
+[Tt]mp/
+*.log
+
+# Publish output
+publish/
+artifacts/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
