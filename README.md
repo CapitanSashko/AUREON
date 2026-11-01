@@ -1,5 +1,7 @@
 # AUREON
 
+[English](README.md) | [Українська](README.uk.md)
+
 **A modern Windows music player built with C# and .NET 8.**
 
 AUREON is a desktop music player designed to provide a convenient music listening experience with audio processing, playlist management and a modern interface.
