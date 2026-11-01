@@ -19,16 +19,17 @@ AUREON is a desktop music player designed to provide a convenient music listenin
 ## Screenshots
 
 ### Main Window
-
-![AUREON Main Window](Screenshots/main-window.png)
+<img width="346" height="649" alt="1" src="https://github.com/user-attachments/assets/13b46bd2-f702-4601-836b-78a474bed56f" />
 
 ### Playlist
 
-![AUREON Playlist](Screenshots/playlist.png)
+<img width="348" height="207" alt="image" src="https://github.com/user-attachments/assets/81c01b26-d6ec-4b40-9dfa-530506725a2c" />
+
 
 ### Equalizer
 
-![AUREON Equalizer](Screenshots/equalizer.png)
+<img width="340" height="135" alt="image" src="https://github.com/user-attachments/assets/75c91b12-6960-442a-9a89-913a525b6745" />
+
 
 ## Technologies
 
