@@ -71,7 +71,7 @@ AUREON — це настільний музичний програвач, роз
 
 ## Ліцензія
 
-AUREON розповсюджується за ліцензією MIT. Докладніше — у файлі [LICENSE](LICENSE).
+AUREON розповсюджується за ліцензією MIT. Докладніше — у файлі [LICENSE](https://github.com/CapitanSashko/AUREON/blob/main/MP3/LICENSE).
 
 ## Автор
 
