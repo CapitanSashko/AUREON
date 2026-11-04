@@ -102,7 +102,8 @@ namespace MP3
 
         private const string PlayGlyph = "\uE768";
         private const string PauseGlyph = "\uE769";
-        private const double FadeDurationSeconds = 1.2; // було 2.0 — м’якше на старті
+        private const float MaxGain = 10f;
+        private const double FadeDurationSeconds = 2.0;
 
         // true: файл cover.jpg у папці важливіший за обкладинку, вшиту в трек
         private static readonly bool PreferFolderCover = false;
@@ -151,12 +152,8 @@ namespace MP3
         protected override void OnSizeChanged(EventArgs e)
         {
             base.OnSizeChanged(e);
-
-            if (IsHandleCreated && !IsWin11)
-                ApplyRoundedCorners();
-
-            if (WindowState == FormWindowState.Normal && !isCustomSize && !onlineOpen)
-                SyncPlaylistToFormHeight();
+            // На Windows 10 область нужно пересоздавать при смене высоты (EQ, сворачивание)
+            if (IsHandleCreated && !IsWin11) ApplyRoundedCorners();
         }
 
         private void ApplyRoundedCorners()
@@ -1227,14 +1224,8 @@ namespace MP3
         }
 
         // ==================== Відтворення ====================
-        // ModernSlider stores real percentage values (0..100/125/150).
-        // MasterVolumeSampleProvider applies gain after the spectrum tap.
-        private float CurrentVolume()
-        {
-            // Volume.Maximum уже = volumeLimit (100/125/150)
-            float v = Volume.Value / (float)Math.Max(1, Volume.Maximum);
-            return Math.Clamp(v, 0f, 1.5f);
-        }
+        private float CurrentVolume() =>
+            Volume.Value / (float)Math.Max(1, Volume.Maximum) * MaxGain;
 
         private float GetFadeFactor()
         {
@@ -1278,7 +1269,7 @@ namespace MP3
                 StopMusic();
                 playingTrack = track;
 
-                audioFileReader = new AudioFileReader(track.FilePath);
+                audioFileReader = new AudioFileReader(track.FilePath) { Volume = 0f };
                 var reader = audioFileReader;
 
                 // Ланцюжок: файл -> швидкість -> 10-смуговий EQ -> Bass/Virtualizer/Sub-bass
@@ -1322,13 +1313,7 @@ namespace MP3
                     Balance = balance
                 };
 
-                // Візуалізатор отримує сигнал до майстер-гучності,
-                // тому його амплітуда не залежить від положення Volume.
-                spectrum = new SpectrumSampleProvider(balanceProvider);
-                masterVolume = new MasterVolumeSampleProvider(spectrum)
-                {
-                    Volume = 0.0008f   // не 0f
-                };
+                spectrum = new SpectrumSampleProvider(balanceProvider, () => reader.Volume);
 
                 waveOutDevice = new WasapiOut();
                 waveOutDevice.PlaybackStopped += WaveOutDevice_PlaybackStopped;
@@ -1717,11 +1702,12 @@ namespace MP3
                 // Восстанавливаем высоту, которая была до открытия EQ
                 Height = _heightBeforeEq;
 
-                // Возвращаем MinimumSize к исходному значению (без учета EQ)
-                MinimumSize = new Size(MinimumSize.Width, Math.Max(100, currentMinH - delta));
+                        // Панель встаёт ровно на место вкладок (до сдвига остальных элементов)
+                        if (open)
+                            eqPanel.Top = playlistTabs.Top;
 
-                MaximumSize = new Size(MaximumSize.Width, maxH);
-            }
+                        foreach (Control c in below)
+                c.Top += delta;
 
             eqPanel.Visible = open;
             UpdateEqToggleUi();
@@ -3371,24 +3357,35 @@ namespace MP3
 
                 if (reduction > 0)
                 {
-                    MinimumSize = new Size(MinimumSize.Width, Math.Max(0, MinimumSize.Height - reduction));
+                    // Порядок важливий: спочатку знижуємо нижню межу (MinimumSize),
+                    // потім сам розмір вікна, потім верхню межу (MaximumSize).
+                    MinimumSize = new Size(MinimumSize.Width,
+                        Math.Max(0, MinimumSize.Height - reduction));
+
                     ClientSize = new Size(ClientSize.Width, ClientSize.Height - reduction);
+
                     if (MaximumSize.Height > 0)
                     {
-                        MaximumSize = new Size(MaximumSize.Width, Math.Max(ClientSize.Height, MaximumSize.Height - reduction));
+                        MaximumSize = new Size(MaximumSize.Width,
+                            Math.Max(ClientSize.Height, MaximumSize.Height - reduction));
                     }
-                    ListPlayer.Height -= reduction; // <-- ОШИБКА: ломает привязки (Anchor)
+
+                    ListPlayer.Height -= reduction;
 
                     Control[] lowerControls =
                     {
-        searchBox, speedButton, repeatTrack, noRepeatTrack,
-        yesshuffleTrack, nosshuffleTrack, AddPlayList, DeletePlayList
-    };
+                        searchBox, speedButton,
+                        repeatTrack, noRepeatTrack,
+                        yesshuffleTrack, nosshuffleTrack,
+                        AddPlayList, DeletePlayList
+                    };
 
                     foreach (Control control in lowerControls)
                     {
-                        if (control != null) control.Top -= reduction; // <-- ОШИБКА: сдвигает кнопки вверх, создавая дыру
+                        if (control != null)
+                            control.Top -= reduction;
                     }
+
                     originalSize = Size;
                 }
 
@@ -3407,201 +3404,5 @@ namespace MP3
             UpdateAudioEnhancementsEnabled();
         }
 
-        private RotaryKnobControl CreateEffectsKnob(
-            string caption, string unit, int min, int max, int initial,
-            Point location, Size size)
-        {
-            var knob = new RotaryKnobControl
-            {
-                Caption = caption,
-                Unit = unit,
-                Minimum = min,
-                Maximum = max,
-                Value = initial,
-                Location = location,
-                Size = size,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left
-            };
-
-            return knob;
-        }
-
-        /// <summary>Готує ModernSlider до шкали реальних відсотків 0–100.</summary>
-        private void InitializeVolumeControl()
-        {
-            Volume.Minimum = 0;
-            Volume.Maximum = 100;
-            Volume.Value = 100;
-
-            volumeLimit = 100;
-            volumeLimitMenu = new ContextMenuStrip
-            {
-                Renderer = new DarkMenuRenderer(),
-                Font = new Font("Segoe UI", 9.5f),
-                ShowImageMargin = false
-            };
-
-            foreach (int limit in new[] { 100, 125, 150 })
-            {
-                int value = limit;
-                var item = new ToolStripMenuItem($"Максимум {value}%")
-                {
-                    Tag = value,
-                    CheckOnClick = false
-                };
-                item.Click += (s, e) => SetVolumeLimit(value);
-                volumeLimitMenu.Items.Add(item);
-            }
-
-            volumeLimitMenu.Opening += (s, e) =>
-            {
-                foreach (ToolStripMenuItem item in volumeLimitMenu.Items)
-                    item.Checked = (int)item.Tag == volumeLimit;
-            };
-
-            // Правий клік по самому повзунку відкриває меню ліміту.
-            Volume.ContextMenuStrip = volumeLimitMenu;
-
-            // Клік по значку динаміка — альтернативний спосіб відкрити це меню.
-            VolumeLabel.Cursor = Cursors.Hand;
-            VolumeLabel.Click += (s, e) =>
-            {
-                volumeLimitMenu.Show(VolumeLabel,
-                    new Point(0, VolumeLabel.Height), ToolStripDropDownDirection.BelowRight);
-            };
-
-            UpdateVolumeToolTip();
-        }
-
-        private void SetVolumeLimit(int limit, bool save = true)
-        {
-            if (limit != 100 && limit != 125 && limit != 150)
-                limit = 100;
-
-            int currentValue = Volume.Value;
-            volumeLimit = limit;
-            Volume.Maximum = limit;
-            Volume.Value = Math.Min(currentValue, limit);
-
-            if (masterVolume != null)
-                masterVolume.Volume = CurrentVolume() * GetFadeFactor();
-
-            UpdateVolumeToolTip();
-
-            if (save)
-                SaveAudioEnhancementSettings();
-        }
-
-        private void UpdateVolumeToolTip()
-        {
-            string text = $"Гучність: {Volume.Value}% (максимум {volumeLimit}%). Правий клік — змінити межу.";
-            toolTip?.SetToolTip(Volume, text);
-            toolTip?.SetToolTip(VolumeLabel, text);
-        }
-
-        private void LoadAudioEnhancementSettings()
-        {
-            try
-            {
-                if (File.Exists(AudioEnhancementSettingsPath))
-                {
-                    foreach (string line in File.ReadLines(AudioEnhancementSettingsPath))
-                    {
-                        int separator = line.IndexOf('=');
-                        if (separator <= 0) continue;
-
-                        string key = line.Substring(0, separator).Trim();
-                        string raw = line.Substring(separator + 1).Trim();
-
-                        switch (key)
-                        {
-                            case "BassBoost":
-                                if (float.TryParse(raw, NumberStyles.Float,
-                                    CultureInfo.InvariantCulture, out float bass))
-                                    bassBoostDb = Math.Clamp(bass, 0f, 12f);
-                                break;
-
-                            case "Virtualizer":
-                                if (float.TryParse(raw, NumberStyles.Float,
-                                    CultureInfo.InvariantCulture, out float virt))
-                                    virtualizerPercent = Math.Clamp(virt, 0f, 100f);
-                                break;
-
-                            case "SubBass":
-                                if (float.TryParse(raw, NumberStyles.Float,
-                                    CultureInfo.InvariantCulture, out float sub))
-                                    subBassDb = Math.Clamp(sub, 0f, 12f);
-                                break;
-
-                            case "VolumeLimit":
-                                if (int.TryParse(raw, out int limit) &&
-                                    (limit == 100 || limit == 125 || limit == 150))
-                                    volumeLimit = limit;
-                                break;
-
-                            case "VolumePercent":
-                                if (int.TryParse(raw, out int percent))
-                                    savedVolumePercent = Math.Clamp(percent, 0, 150);
-                                break;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // Пошкоджений файл налаштувань не заважає запуску плеєра.
-            }
-
-            bassBoostKnob?.SetValue((int)Math.Round(bassBoostDb), false);
-            virtualizerKnob?.SetValue((int)Math.Round(virtualizerPercent), false);
-            subBassKnob?.SetValue((int)Math.Round(subBassDb), false);
-
-            SetVolumeLimit(volumeLimit, save: false);
-            Volume.Value = Math.Min(savedVolumePercent, volumeLimit);
-            UpdateVolumeToolTip();
-            ApplyAudioEnhancementValues();
-        }
-
-        private void SaveAudioEnhancementSettings()
-        {
-            try
-            {
-                string directory = Path.GetDirectoryName(AudioEnhancementSettingsPath);
-                if (!string.IsNullOrEmpty(directory))
-                    Directory.CreateDirectory(directory);
-
-                File.WriteAllLines(AudioEnhancementSettingsPath, new[]
-                {
-                    "BassBoost=" + bassBoostDb.ToString("0", CultureInfo.InvariantCulture),
-                    "Virtualizer=" + virtualizerPercent.ToString("0", CultureInfo.InvariantCulture),
-                    "SubBass=" + subBassDb.ToString("0", CultureInfo.InvariantCulture),
-                    "VolumeLimit=" + volumeLimit.ToString(CultureInfo.InvariantCulture),
-                    "VolumePercent=" + Volume.Value.ToString(CultureInfo.InvariantCulture)
-                });
-            }
-            catch
-            {
-                // Налаштування ефектів необов'язкові; помилка запису не зупиняє плеєр.
-            }
-        }
-
-        private void ApplyAudioEnhancementValues()
-        {
-            if (audioEffects == null) return;
-
-            audioEffects.BassBoostDb = bassBoostDb;
-            audioEffects.Virtualizer = virtualizerPercent;
-            audioEffects.SubBassDb = subBassDb;
-        }
-
-        private void UpdateAudioEnhancementsEnabled()
-        {
-            if (audioEffects != null)
-                audioEffects.Enabled = eqEnabled;
-
-            if (bassBoostKnob != null) bassBoostKnob.Enabled = eqEnabled;
-            if (virtualizerKnob != null) virtualizerKnob.Enabled = eqEnabled;
-            if (subBassKnob != null) subBassKnob.Enabled = eqEnabled;
-        }
     }
 }

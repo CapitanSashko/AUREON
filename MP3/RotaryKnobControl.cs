@@ -163,7 +163,6 @@ namespace MP3
             using (var centerText = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
             {
                 g.DrawString(Caption ?? "", captionFont, captionBrush,
-    new RectangleF(0, 4f * scale, width, 13f * scale), centerText);
 
                 var arc = new RectangleF(centerX - radius, centerY - radius,
                     radius * 2f, radius * 2f);
