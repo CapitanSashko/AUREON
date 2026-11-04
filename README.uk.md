@@ -59,7 +59,7 @@ AUREON — компактний програвач для вашої локал�
 
 ### Еквалайзер
 
-<img width="340" height="135" alt="image" src="https://github.com/user-attachments/assets/75c91b12-6960-442a-9a89-913a525b6745" />
+<img width="331" height="241" alt="image" src="https://github.com/user-attachments/assets/2e297646-bcc1-4acd-b35e-ca0e642e8ddd" />
 
 ### Згорнутий вигляд
 
