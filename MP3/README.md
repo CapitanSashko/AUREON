@@ -1,89 +1,77 @@
 # AUREON
 
-### Music without boundaries.
+[English](README.md) | [Українська](README.uk.md)
 
-**AUREON** is a modern Windows music player built with C# and .NET 8, designed for a comfortable and customizable music listening experience.
+**A modern Windows music player built with C# and .NET 8.**
 
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue)](https://www.microsoft.com/windows)
-[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
----
-
-## Overview
-
-AUREON combines local music playback, audio customization and an integrated desktop experience in one application.
+AUREON is a desktop music player designed to provide a convenient music listening experience with audio processing, playlist management and a modern interface.
 
 ## Features
 
-- **Audio formats** — MP3, FLAC, WAV, AIFF, WMA, M4A, AAC and MP4.
-- **Playlist management** — organize and manage your music.
-- **Audio equalizer** — customize the sound to your preferences.
-- **Playback speed** — adjust playback tempo.
-- **Shuffle and repeat** — choose how your music plays.
-- **Volume and balance** — control audio output.
-- **Spectrum visualization** — visualize audio playback.
-- **Smooth transitions** — seamless-feeling track changes.
-- **Integrated music services** — access supported services through WebView2.
+- Support for MP3, FLAC, WAV, AIFF, WMA, M4A, AAC and MP4 audio files.
+- Playlist management.
+- Audio equalizer.
+- Playback speed control.
+- Shuffle and repeat playback.
+- Volume and balance control.
+- Audio spectrum visualization.
+- Smooth track transitions.
+- Integrated music services through WebView2.
 
 ## Screenshots
 
 ### Main Window
-
-![AUREON Main Window](Screenshots/main-window.png)
+<img width="346" height="649" alt="1" src="https://github.com/user-attachments/assets/13b46bd2-f702-4601-836b-78a474bed56f" />
 
 ### Playlist
 
-![AUREON Playlist](Screenshots/playlist.png)
+<img width="325" height="169" alt="image" src="https://github.com/user-attachments/assets/ab4b89d1-0119-42a3-ac16-f150992ff8fd" />
 
 ### Equalizer
 
-![AUREON Equalizer](Screenshots/equalizer.png)
+<img width="340" height="135" alt="image" src="https://github.com/user-attachments/assets/75c91b12-6960-442a-9a89-913a525b6745" />
 
-## Built With
+### Collapsed view
+
+<img width="346" height="137" alt="image" src="https://github.com/user-attachments/assets/fcc81184-a54e-4ae2-b9fe-07522e44ed8f" />
+
+## Technologies
 
 - C#
 - .NET 8
 - Windows Forms
 - NAudio
-- SoundTouch.Net
+- SoundTouch
 - TagLibSharp
 - Microsoft Edge WebView2
 
 ## System Requirements
 
-- Windows 10 or Windows 11 (x64).
+- Windows 10 or Windows 11, x64.
 - Microsoft Edge WebView2 Runtime.
-- .NET 8 Desktop Runtime for framework-dependent builds.
-
-The self-contained release includes the .NET runtime. WebView2 Runtime may need to be installed separately.
+- .NET 8 Desktop Runtime is required for framework-dependent builds.
 
 ## Download
 
-Get the latest version from **[GitHub Releases](https://github.com/CapitanSashko/AUREON/releases)**.
+Download the latest version from [GitHub Releases](../../releases).
 
 ## Build from Source
 
 1. Install Visual Studio with the .NET desktop development workload.
-2. Clone the repository:
+2. Clone this repository:
 
    ```bash
    git clone https://github.com/CapitanSashko/AUREON.git
    ```
 
-3. Open the solution in Visual Studio.
+3. Open `AUREON.sln` in Visual Studio.
 4. Restore NuGet packages.
-5. Select the Release configuration.
-6. Build and run the project.
-
-## Contributing
-
-Suggestions, bug reports and contributions are welcome. Please use GitHub Issues to report problems or suggest improvements.
+5. Build the project using the Release configuration.
 
 ## License
 
-AUREON is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+AUREON is distributed under the MIT License. See [LICENSE](https://github.com/CapitanSashko/AUREON/blob/main/MP3/LICENSE) for details.
 
----
+## Author
 
-**AUREON — Music without boundaries.**
+Developed by Oleksandr Echkenko.
