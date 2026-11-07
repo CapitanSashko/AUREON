@@ -1,17 +1,19 @@
 ﻿using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using SoundTouch.Net.NAudioSupport;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
+using System.IO.Pipes;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Runtime.InteropServices;
-using System.Drawing.Drawing2D;
-using SoundTouch.Net.NAudioSupport;
 
 namespace MP3
 {
@@ -26,6 +28,11 @@ namespace MP3
         // ==================== Власна панель AUREON ====================
 
         private Panel titleBar;
+
+        private int _heightBeforeEq; // Запоминаем высоту окна до открытия EQ
+
+        private int _lastClientHeight;
+        private int _listPlayerBaseTop; // Top плейлиста (не змінюємо при ресайзі знизу)
         private Label titleLabel;
         private Button minimizeButton;
         private Button closeButton;
@@ -39,32 +46,13 @@ namespace MP3
         private Button onlineButton;
         private bool onlineOpen;
         private HScrollBar onlineScroll;
-        private const int OnlineWideWidth = 900;   // ширина страницы для Spotify и Apple Music
+        private const int OnlineWideWidth = 900;   // ширина сторінки для Spotify та Apple Music
         private bool reopenOnlineAfterRestore;
         private const bool UseMobileUserAgent = true;
 
         private enum OnlineService { YouTubeMusic, Spotify, AppleMusic }
         private OnlineService onlineService = OnlineService.YouTubeMusic;
         private ContextMenuStrip onlineMenu;
-
-        private static readonly HashSet<string> SupportedAudioExtensions =
-       new(StringComparer.OrdinalIgnoreCase)
-       {
-        ".mp3",
-        ".wav",
-        ".aiff",
-        ".aif",
-        ".wma",
-        ".m4a",
-        ".aac",
-        ".mp4",
-        ".flac"
-       };
-
-        private static bool IsSupportedAudioFile(string path)
-        {
-            return SupportedAudioExtensions.Contains(Path.GetExtension(path));
-        }
 
         private const string DesktopUserAgent =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -78,7 +66,7 @@ namespace MP3
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                          "AUREON", "webview2");
 
-        // Свои пресеты и скорость
+        // Власні пресети та швидкість
         private readonly List<(string Name, float[] Gains)> customPresets = new();
         private static readonly string PresetsFilePath =
             Path.Combine(AppContext.BaseDirectory, "equalizer", "presets.cfg");
@@ -90,7 +78,15 @@ namespace MP3
         private static readonly float[] SpeedSteps = { 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f };
         private float balance;                       // -1 ... +1
         private BalanceSampleProvider balanceProvider;
+        private AudioEffectsSampleProvider audioEffects;
+        private MasterVolumeSampleProvider masterVolume;
         private readonly Dictionary<string, int> ratings = new(StringComparer.OrdinalIgnoreCase);
+
+        private bool _resizingBottom;
+        private int _resizeStartY;
+        private int _resizeStartHeight;
+        private int _listStartHeight;
+        private const int BottomResizeBorder = 6; // зона захвату знизу, px
 
         private const int TitleBarHeight = 30;
         private const int WM_NCLBUTTONDOWN = 0xA1;
@@ -108,8 +104,7 @@ namespace MP3
 
         private const string PlayGlyph = "\uE768";
         private const string PauseGlyph = "\uE769";
-        private const float MaxGain = 10f;
-        private const double FadeDurationSeconds = 2.0;
+        private const double FadeDurationSeconds = 1.2; // було 2.0 — м’якше на старті
 
         // true: файл cover.jpg у папці важливіший за обкладинку, вшиту в трек
         private static readonly bool PreferFolderCover = false;
@@ -129,15 +124,15 @@ namespace MP3
             Path.Combine(PlaylistDir, "tabs.cfg");
 
         private static readonly string RatingsFilePath =
-    Path.Combine(PlaylistDir, "ratings.cfg");
+            Path.Combine(PlaylistDir, "ratings.cfg");
 
         private static readonly string EqSettingsPath =
-              Path.Combine(AppContext.BaseDirectory, "equalizer", "equalizer.cfg");
+            Path.Combine(AppContext.BaseDirectory, "equalizer", "equalizer.cfg");
 
         private Size originalSize;
 
 
-        // Куглые края у формы
+        // Заокруглені кути форми
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
@@ -158,8 +153,12 @@ namespace MP3
         protected override void OnSizeChanged(EventArgs e)
         {
             base.OnSizeChanged(e);
-            // На Windows 10 область нужно пересоздавать при смене высоты (EQ, сворачивание)
-            if (IsHandleCreated && !IsWin11) ApplyRoundedCorners();
+
+            if (IsHandleCreated && !IsWin11)
+                ApplyRoundedCorners();
+
+            if (WindowState == FormWindowState.Normal && !isCustomSize && !onlineOpen)
+                SyncPlaylistToFormHeight();
         }
 
         private void ApplyRoundedCorners()
@@ -270,15 +269,8 @@ namespace MP3
         {
             InitializeComponent();
 
-            openFileDialog.Filter =
-     "Аудіофайли|*.mp3;*.wav;*.aiff;*.aif;*.wma;*.m4a;*.aac;*.mp4;*.flac|" +
-     "Усі файли|*.*";
-
-            openFileDialog.Title = "Виберіть аудіофайли";
-            openFileDialog.Multiselect = true;
-
             BuildTitleBar();
-            BuildPlaylistTabs();     // до originalSize: окно становится выше на высоту вкладок
+            BuildPlaylistTabs();     // до originalSize: вікно стає вищим на висоту вкладок
             BuildOnlineButton();
 
             originalSize = Size;
@@ -308,15 +300,18 @@ namespace MP3
 
 
             LayoutEqPanel();
+            BuildAudioEnhancementsUi();
+            InitializeVolumeControl();
             eqPresetButton.ShowDropArrow = true;
             LoadEqualizerSettings();
+            LoadAudioEnhancementSettings();
 
             toast = new TrackToast();
             LoadToastSetting();
         }
 
 
-        // удерживает файл открытым.
+        // Завантажує зображення з файлу, не залишаючи його відкритим (файл не блокується).
         private static Image LoadImageWithoutLocking(string path)
         {
             if (!File.Exists(path))
@@ -331,7 +326,7 @@ namespace MP3
         }
 
 
-        // метод создания панели
+        // Метод створення власної панелі заголовка
         private void BuildTitleBar()
         {
 
@@ -355,9 +350,10 @@ namespace MP3
                 MinimumSize.Width,
                 MinimumSize.Height + TitleBarHeight);
 
+            // Після рядків з MinimumSize / MaximumSize + TitleBarHeight:
             MaximumSize = new Size(
-                MaximumSize.Width,
-                MaximumSize.Height + TitleBarHeight);
+                MaximumSize.Width > 0 ? MaximumSize.Width : 0,
+                Math.Max(MaximumSize.Height, 2000)); // можна тягнути вниз
 
             titleBar = new Panel
             {
@@ -375,7 +371,7 @@ namespace MP3
                 SizeMode = PictureBoxSizeMode.Zoom,
                 BackColor = Color.Transparent,
                 Image = LoadImageWithoutLocking(
-         Path.Combine(AppContext.BaseDirectory, "Image", "logo.png"))
+                    Path.Combine(AppContext.BaseDirectory, "Image", "logo.png"))
             };
 
 
@@ -469,6 +465,7 @@ namespace MP3
 
 
         // ==================== Завантаження ====================
+
         private void Form1_Load(object sender, EventArgs e)
         {
             SetupToolTips();
@@ -476,12 +473,36 @@ namespace MP3
             LoadPlaylists();
             ShowPlaylist(viewList);
 
-            SetCover(LoadDefaultCover());   // обкладинка за замовчуванням до запуску треку
+            SetCover(LoadDefaultCover());
 
-            if (viewList.Tracks.Count > 0)
+            // Обробляємо файли, передані Windows під час запуску AUREON.
+            int previousCount = viewList.Tracks.Count;
+
+            if (Program.StartupFiles.Length > 0)
+            {
+                AddFilesToViewList(Program.StartupFiles);
+                SavePlaylist(viewList);
+
+                // Запускаємо перший файл, переданий під час запуску.
+                if (viewList.Tracks.Count > previousCount)
+                    SelectAndPlay(previousCount);
+            }
+            else if (viewList.Tracks.Count > 0)
+            {
+                // Звичайний запуск: відтворюємо перший трек плейлиста.
                 SelectAndPlay(0);
+            }
+
+            _lastClientHeight = ClientSize.Height;
+            _listPlayerBaseTop = ListPlayer.Top;
+
+            SyncPlaylistToFormHeight();
+            ClampFormToScreen();
+
+            StartPipeServer();
         }
-        
+
+
 
         private void SetupToolTips()
         {
@@ -510,6 +531,7 @@ namespace MP3
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             SaveEqualizerSettings();
+            SaveAudioEnhancementSettings();
             SaveTabs();
             StopMusic();
             toast?.Dispose();
@@ -1018,7 +1040,21 @@ namespace MP3
             return dlg.ShowDialog(this) == DialogResult.OK ? tb.Text.Trim() : null;
         }
 
-        // ==================== Додавання треків ====================
+        // ==================== Додавання аудіофайлів ====================
+        // Формати, які підтримує поточний ланцюжок відтворення NAudio.
+        private static readonly HashSet<string> SupportedAudioExtensions =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                ".mp3", ".wav", ".aiff", ".aif", ".wma",
+                ".m4a", ".aac", ".mp4", ".flac"
+            };
+
+        private static bool IsSupportedAudioFile(string path)
+        {
+            return !string.IsNullOrWhiteSpace(path) &&
+                   SupportedAudioExtensions.Contains(Path.GetExtension(path));
+        }
+
         private static string[] AudioFilesIn(string dir, SearchOption option)
         {
             try
@@ -1047,7 +1083,7 @@ namespace MP3
                 }
                 else if (File.Exists(path) && IsSupportedAudioFile(path))
                 {
-                    p.Add(path);
+                    p.Add(Path.GetFullPath(path));
                 }
             }
         }
@@ -1210,19 +1246,48 @@ namespace MP3
         }
 
         // ==================== Відтворення ====================
-        private float CurrentVolume() =>
-            Volume.Value / (float)Math.Max(1, Volume.Maximum) * MaxGain;
+        // ModernSlider stores real percentage values (0..100/125/150).
+        // MasterVolumeSampleProvider applies gain after the spectrum tap.
+        private float CurrentVolume()
+        {
+            // Volume.Maximum уже = volumeLimit (100/125/150)
+            float v = Volume.Value / (float)Math.Max(1, Volume.Maximum);
+            return Math.Clamp(v, 0f, 1.5f);
+        }
 
         private float GetFadeFactor()
         {
             if (audioFileReader == null || FadeDurationSeconds <= 0)
                 return 1f;
 
+            double total = audioFileReader.TotalTime.TotalSeconds;
+            if (total <= 0.05)
+                return 1f;
+
+            // Fade не довший за 15% треку і не довший за FadeDurationSeconds
+            double fade = Math.Min(FadeDurationSeconds, total * 0.15);
+            // На дуже коротких треках майже без fade
+            if (total < 4.0)
+                fade = Math.Min(fade, total * 0.08);
+            if (fade < 0.05)
+                return 1f;
+
             double elapsed = audioFileReader.CurrentTime.TotalSeconds;
-            double remaining = (audioFileReader.TotalTime - audioFileReader.CurrentTime).TotalSeconds;
-            double fadeIn = Math.Clamp(elapsed / FadeDurationSeconds, 0.0, 1.0);
-            double fadeOut = Math.Clamp(remaining / FadeDurationSeconds, 0.0, 1.0);
-            return (float)Math.Min(fadeIn, fadeOut);
+            double remaining = total - elapsed;
+
+            // Плавна S-крива (cosine), без лінійних «сходинок»
+            static float Smooth(double t)
+            {
+                t = Math.Clamp(t, 0.0, 1.0);
+                return (float)(0.5 - 0.5 * Math.Cos(t * Math.PI));
+            }
+
+            float fadeIn = Smooth(elapsed / fade);
+            float fadeOut = Smooth(remaining / fade);
+            float factor = Math.Min(fadeIn, fadeOut);
+
+            // Не глушимо повністю в нуль — менше клацань на старті/кінці
+            return Math.Max(0.0008f, factor);
         }
 
         private void PlayTrack(Track track)
@@ -1232,15 +1297,15 @@ namespace MP3
                 StopMusic();
                 playingTrack = track;
 
-                audioFileReader = new AudioFileReader(track.FilePath) { Volume = 0f };
+                audioFileReader = new AudioFileReader(track.FilePath);
                 var reader = audioFileReader;
 
-                // Ланцюжок: файл -> еквалайзер -> «підслуховування» для візуалізатора -> вихід.
-                // Гучність і затухання вже враховані у файлі-джерелі; для візуалізатора
-                // їх компенсуємо, щоб смужки від повзунка гучності не залежали.
-                // Моно превращаем в стерео, чтобы баланс работал на любом файле
+                // Ланцюжок: файл -> швидкість -> 10-смуговий EQ -> Bass/Virtualizer/Sub-bass
+                // -> баланс -> візуалізатор -> майстер-гучність.
+                // Майстер-гучність стоїть ПІСЛЯ візуалізатора, тому його показники
+                // не змінюються при переміщенні повзунка 0–150%.
 
-                // Обработка скорости без изменения высоты тона
+                // Обробка швидкості без зміни висоти тону
                 var speedInput = new WaveChannel32(reader)
                 {
                     PadWithZeroes = false
@@ -1253,7 +1318,7 @@ namespace MP3
 
                 ISampleProvider source = new WaveToSampleProvider(soundTouchStream);
 
-                // Моно превращаем в стерео для корректной работы баланса
+                // Моно перетворюємо на стерео для коректної роботи балансу
                 if (reader.WaveFormat.Channels == 1)
                     source = new MonoToStereoSampleProvider(source);
 
@@ -1261,16 +1326,32 @@ namespace MP3
                 equalizer.SetAllGains(eqGains, immediate: true);
                 equalizer.Enabled = eqEnabled;
 
-                balanceProvider = new BalanceSampleProvider(equalizer)
+                // Додаткові ефекти йдуть після 10-смугового EQ,
+                // тому стандартні пресети та ручні смуги не змінюються.
+                audioEffects = new AudioEffectsSampleProvider(equalizer)
+                {
+                    BassBoostDb = bassBoostDb,
+                    Virtualizer = virtualizerPercent,
+                    SubBassDb = subBassDb,
+                    Enabled = eqEnabled
+                };
+
+                balanceProvider = new BalanceSampleProvider(audioEffects)
                 {
                     Balance = balance
                 };
 
-                spectrum = new SpectrumSampleProvider(balanceProvider, () => reader.Volume);
+                // Візуалізатор отримує сигнал до майстер-гучності,
+                // тому його амплітуда не залежить від положення Volume.
+                spectrum = new SpectrumSampleProvider(balanceProvider);
+                masterVolume = new MasterVolumeSampleProvider(spectrum)
+                {
+                    Volume = 0.0008f   // не 0f
+                };
 
                 waveOutDevice = new WasapiOut();
                 waveOutDevice.PlaybackStopped += WaveOutDevice_PlaybackStopped;
-                waveOutDevice.Init(new SampleToWaveProvider(spectrum));
+                waveOutDevice.Init(new SampleToWaveProvider(masterVolume));
                 waveOutDevice.Play();
                 spectrumView.Source = spectrum;
                 fadeTimer.Start();
@@ -1297,7 +1378,9 @@ namespace MP3
             spectrumView.Source = null;
             spectrum = null;
             equalizer = null;
+            audioEffects = null;
             balanceProvider = null;
+            masterVolume = null;
 
             if (waveOutDevice != null)
             {
@@ -1399,14 +1482,16 @@ namespace MP3
         // ==================== Гучність і прогрес ====================
         private void trackBar1_Scroll(object sender, EventArgs e)
         {
-            if (audioFileReader != null)
-                audioFileReader.Volume = CurrentVolume() * GetFadeFactor();
+            if (masterVolume != null)
+                masterVolume.Volume = CurrentVolume() * GetFadeFactor();
+
+            UpdateVolumeToolTip();
         }
 
         private void FadeTimer_Tick(object sender, EventArgs e)
         {
-            if (audioFileReader == null) return;
-            audioFileReader.Volume = CurrentVolume() * GetFadeFactor();
+            if (masterVolume == null) return;
+            masterVolume.Volume = CurrentVolume() * GetFadeFactor();
         }
 
         private void TimerMusicComponent_Tick(object sender, EventArgs e)
@@ -1491,7 +1576,7 @@ namespace MP3
                                 eqEnabled = value != "0";
                                 break;
 
-                                case "Speed":
+                            case "Speed":
                                 if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float sp))
                                     speed = Math.Clamp(sp, 0.25f, 4f);
                                 break;
@@ -1546,13 +1631,12 @@ namespace MP3
 
                 Directory.CreateDirectory(Path.GetDirectoryName(EqSettingsPath));
                 File.WriteAllLines(EqSettingsPath, new[]
-                             {
+                {
                     $"Enabled={(eqEnabled ? 1 : 0)}",
                     $"Preset={eqPreset}",
                     $"Gains={gains}",
                     $"Balance={balance.ToString("0.00", CultureInfo.InvariantCulture)}",
-                    $"Balance={balance.ToString("0.00", CultureInfo.InvariantCulture)}",
-$"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
+                    $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
                 });
             }
             catch
@@ -1567,6 +1651,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             eqToggleButton.Kind = eqEnabled ? ButtonKind.Accent : ButtonKind.Soft;
             eqToggleButton.ForeColor = eqEnabled ? Color.White : Color.FromArgb(200, 200, 208);
             equalizerView.Active = eqEnabled;
+            UpdateAudioEnhancementsEnabled();
 
             // Кнопка EQ підсвічується, поки панель відкрита
             eqButton.ForeColor = eqPanelOpen
@@ -1575,7 +1660,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
         }
 
         private void UpdateEqPresetUi() =>
-     eqPresetButton.Text = "≡  " + eqPreset;
+            eqPresetButton.Text = "≡  " + eqPreset;
 
         private void ApplyPreset(string name)
         {
@@ -1600,48 +1685,89 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
         {
             if (open == eqPanelOpen) return;
 
-            int delta = (eqPanel.Height + EqGap) * (open ? 1 : -1);
+            int delta = eqPanel.Height + EqGap;
             eqPanelOpen = open;
+
+            Rectangle area = Screen.FromControl(this).WorkingArea;
+            int maxH = area.Height;
 
             if (open)
             {
-                MaximumSize = new Size(MaximumSize.Width, MaximumSize.Height + delta);
-                ClientSize = new Size(ClientSize.Width, ClientSize.Height + delta);
+                // 1. ЗАПОМИНАЕМ текущую высоту окна (когда EQ был закрыт)
+                _heightBeforeEq = Height;
+
+                // 2. Пытаемся увеличить окно на высоту EQ
+                int targetH = Math.Min(Height + delta, maxH);
+                int applied = targetH - Height;
+
+                MaximumSize = new Size(MaximumSize.Width, maxH);
+
+                // Временно снимаем ограничение MinimumSize, чтобы окно могло расти
+                int oldMinHeight = MinimumSize.Height;
+                MinimumSize = new Size(MinimumSize.Width, 0);
+
+                Height = targetH;
+
+                // 3. Возвращаем MinimumSize, но уже с учетом высоты EQ
+                MinimumSize = new Size(MinimumSize.Width, oldMinHeight + delta);
+
+                // 4. Позиционируем EQ и плейлист
+                int shortfall = delta - applied;
+                if (shortfall > 0)
+                {
+                    ListPlayer.Top += shortfall;
+                    eqPanel.Top = ListPlayer.Top - EqGap - eqPanel.Height;
+                }
+                else
+                {
+                    eqPanel.Top = playlistTabs.Bottom + EqGap;
+                    ListPlayer.Top = eqPanel.Bottom + EqGap;
+                }
             }
             else
             {
-                ClientSize = new Size(ClientSize.Width, ClientSize.Height + delta);
-                MaximumSize = new Size(MaximumSize.Width, MaximumSize.Height + delta);
+                // Закрываем EQ
+                ListPlayer.Top = playlistTabs.Bottom + EqGap;
+
+                // Временно снимаем ограничение, чтобы окно могло сжаться
+                int currentMinH = MinimumSize.Height;
+                MinimumSize = new Size(MinimumSize.Width, 0);
+
+                // Восстанавливаем высоту, которая была до открытия EQ
+                Height = _heightBeforeEq;
+
+                // Возвращаем MinimumSize к исходному значению (без учета EQ)
+                MinimumSize = new Size(MinimumSize.Width, Math.Max(100, currentMinH - delta));
+
+                MaximumSize = new Size(MaximumSize.Width, maxH);
             }
-
-            Control[] below =
-            {
-                playlistTabs, ListPlayer, searchBox, speedButton,
-                repeatTrack, noRepeatTrack, yesshuffleTrack, nosshuffleTrack,
-                AddPlayList, DeletePlayList
-            };
-
-                        // Панель встаёт ровно на место вкладок (до сдвига остальных элементов)
-                        if (open)
-                            eqPanel.Top = playlistTabs.Top;
-
-                        foreach (Control c in below)
-                c.Top += delta;
 
             eqPanel.Visible = open;
             UpdateEqToggleUi();
 
-            if (open)
-            {
-                // Вікно має вміститись на екрані
-                Rectangle area = Screen.FromControl(this).WorkingArea;
-                if (Bottom > area.Bottom)
-                    Top = Math.Max(area.Top, area.Bottom - Height);
-            }
-            else
-            {
+            SyncPlaylistToFormHeight();
+            ClampFormToScreen();
+
+            if (!open)
                 SaveEqualizerSettings();
-            }
+        }
+
+
+        private void ClampFormToScreen()
+        {
+            Rectangle area = Screen.FromControl(this).WorkingArea;
+            int maxH = area.Height; // можна area.Height - 8
+
+            if (MaximumSize.Height <= 0 || MaximumSize.Height > maxH)
+                MaximumSize = new Size(MaximumSize.Width, maxH);
+
+            if (Height > maxH)
+                Height = maxH;
+
+            if (Bottom > area.Bottom)
+                Top = Math.Max(area.Top, area.Bottom - Height);
+            if (Top < area.Top)
+                Top = area.Top;
         }
 
         private void eqButton_Click(object sender, EventArgs e)
@@ -1677,7 +1803,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             SaveEqualizerSettings();
         }
 
-        // Користувач рухає ползунки
+        // Користувач рухає повзунки
         private void equalizerView_GainsChanged(object sender, EventArgs e)
         {
             Array.Copy(equalizerView.Gains, eqGains, eqGains.Length);
@@ -1689,6 +1815,45 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             }
 
             equalizer?.SetAllGains(eqGains, immediate: false);
+        }
+
+
+        /// <summary>
+        /// Після зміни висоти вікна: плейлист розтягується, нижні кнопки їдуть за ним.
+        /// </summary>
+        private void SyncPlaylistToFormHeight()
+        {
+            ClampFormToScreen();
+
+            if (isCustomSize || onlineOpen)
+                return;
+
+            const int bottomBarHeight = 36;
+            const int bottomPad = 8;
+            const int gap = 8;
+
+            // Кнопки ВСЕГДА прижаты к низу окна
+            int buttonsY = ClientSize.Height - bottomPad - bottomBarHeight;
+
+            // Защита: если окно слишком сжали
+            if (buttonsY < ListPlayer.Top + 80)
+                buttonsY = ListPlayer.Top + 80;
+
+            // Плейлист занимает всё место от своего верха (он под EQ) до кнопок
+            ListPlayer.Height = buttonsY - gap - ListPlayer.Top;
+
+            // Расставляем кнопки
+            if (searchBox != null) searchBox.Top = buttonsY;
+            if (speedButton != null) speedButton.Top = buttonsY;
+            if (repeatTrack != null) repeatTrack.Top = buttonsY;
+            if (noRepeatTrack != null) noRepeatTrack.Top = buttonsY;
+            if (yesshuffleTrack != null) yesshuffleTrack.Top = buttonsY;
+            if (nosshuffleTrack != null) nosshuffleTrack.Top = buttonsY;
+            if (AddPlayList != null) AddPlayList.Top = buttonsY;
+            if (DeletePlayList != null) DeletePlayList.Top = buttonsY;
+
+            _lastClientHeight = ClientSize.Height;
+            originalSize = Size;
         }
 
         // ==================== Сповіщення про трек ====================
@@ -2070,7 +2235,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
 
                 if (version != _durationVersion || IsDisposed) return;
                 AllTracksTime.Text = $"Усього {count} {TrackWord(count)} — {FormatDuration(total)}";
-                ListPlayer.Invalidate();   // перерисовать длительности, которые только что посчитались
+                ListPlayer.Invalidate();   // перемалювати тривалості, які щойно порахувалися
             }
             catch { }
         }
@@ -2196,8 +2361,8 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             progressBarMusic.Location = new Point(70, y);
 
             int bottom = Math.Max(
-            TimerLabel.Bottom,
-            progressBarMusic.Bottom
+                TimerLabel.Bottom,
+                progressBarMusic.Bottom
             );
 
             Height = bottom + 12;
@@ -2237,6 +2402,8 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             Location = new Point(
                 area.X + (area.Width - Width) / 2,
                 area.Y + (area.Height - Height) / 2);
+
+            _lastClientHeight = ClientSize.Height;
         }
 
         private void Form1_SizeChanged(object sender, EventArgs e)
@@ -2251,6 +2418,8 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             }
 
             if (isCustomSize) return;
+
+
         }
 
         // Подвійний клік по обкладинці → згорнути
@@ -2276,8 +2445,65 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
         // Порожній обробник: у Designer лишився Click, нічого не робить
         private void pictureCover_Click(object sender, EventArgs e) { }
 
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            // Разрешаем ресайз при открытом EQ. Блокируем только если окно свёрнуто в мини-режим.
+            if (e.Button != MouseButtons.Left || isCustomSize || onlineOpen)
+                return;
+
+            if (e.Y >= ClientSize.Height - BottomResizeBorder)
+            {
+                _resizingBottom = true;
+                _resizeStartY = Cursor.Position.Y;
+                _resizeStartHeight = Height;
+                _listStartHeight = ListPlayer.Height;
+                Capture = true;
+                Cursor = Cursors.SizeNS;
+            }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+
+            if (!_resizingBottom)
+            {
+                if (!isCustomSize && !onlineOpen &&
+                    e.Y >= ClientSize.Height - BottomResizeBorder)
+                    Cursor = Cursors.SizeNS;
+                else
+                    Cursor = Cursors.Default;
+                return;
+            }
+
+            int dy = Cursor.Position.Y - _resizeStartY;
+            int newH = _resizeStartHeight + dy;
+
+            int minH = MinimumSize.Height > 0 ? MinimumSize.Height : 400;
+            int maxH = MaximumSize.Height > 0 ? MaximumSize.Height : 5000;
+            newH = Math.Clamp(newH, minH, maxH);
+
+            Height = newH;
+            SyncPlaylistToFormHeight();
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (!_resizingBottom) return;
+
+            _resizingBottom = false;
+            Capture = false;
+            Cursor = Cursors.Default;
+            originalSize = Size; // після collapse/restore збереже нову висоту
+        }
+
         protected override void WndProc(ref Message m)
         {
+            const int WM_NCHITTEST = 0x84;
+            const int HTCLIENT = 1;
+            const int HTBOTTOM = 15;
             const int WM_SYSCOMMAND = 0x0112;
             const int SC_MINIMIZE = 0xF020;
 
@@ -2292,6 +2518,18 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
                 else
                 {
                     CollapseToCorner();
+                }
+                return;
+            }
+
+            if (m.Msg == WM_NCHITTEST && !isCustomSize && !onlineOpen)
+            {
+                base.WndProc(ref m);
+                if (m.Result == (IntPtr)HTCLIENT)
+                {
+                    Point p = PointToClient(Cursor.Position);
+                    if (p.Y >= ClientSize.Height - BottomResizeBorder)
+                        m.Result = (IntPtr)HTBOTTOM;
                 }
                 return;
             }
@@ -2410,19 +2648,19 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
         private void nosshuffleTrack_Click(object sender, EventArgs e) => SetShuffleMode(false);
 
 
-        // Выравниваем верхний ряд панели EQ по краям equalizerView
+        // Вирівнюємо верхній ряд панелі EQ за краями equalizerView
         private void LayoutEqPanel()
         {
-            const int margin = 4;   // тот же отступ, что у equalizerView
+            const int margin = 4;   // той самий відступ, що й у equalizerView
             const int gap = 6;
 
-            // Кнопка вкл/выкл прижата к правому краю
+            // Кнопка ввімк/вимк притиснута до правого краю
             eqToggleButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             eqToggleButton.Location = new Point(
                 eqPanel.ClientSize.Width - margin - eqToggleButton.Width,
                 margin);
 
-            // Кнопка пресетов занимает всё оставшееся место слева
+            // Кнопка пресетів займає все місце, що лишилось ліворуч
             eqPresetButton.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             eqPresetButton.Location = new Point(margin, margin);
             eqPresetButton.Width = eqToggleButton.Left - gap - margin;
@@ -2485,10 +2723,10 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             }
         }
 
-        // ==================== Баланс, оценки, длительность ====================
+        // ==================== Баланс, оцінки, тривалість ====================
         private void BuildListExtras()
         {
-            // Надпись «Усього…» ужимаем, справа от неё ставим баланс
+            // Напис «Усього…» звужуємо, праворуч від нього ставимо баланс
             AllTracksTime.AutoSize = false;
             AllTracksTime.AutoEllipsis = true;
             AllTracksTime.TextAlign = ContentAlignment.MiddleLeft;
@@ -2513,7 +2751,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             Controls.Add(balanceSlider);
             UpdateBalanceTip();
 
-            // Оценки и длительность в списке
+            // Оцінки та тривалість у списку
             ListPlayer.RatingProvider = o =>
                 o is Track t && ratings.TryGetValue(t.FilePath, out int r) ? r : 0;
 
@@ -2536,7 +2774,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             if (ListPlayer.Items[index] is not Track t) return;
 
             ratings.TryGetValue(t.FilePath, out int current);
-            int value = current == stars ? 0 : stars;     // той же клик снимает оценку
+            int value = current == stars ? 0 : stars;     // повторний клік знімає оцінку
 
             if (value == 0) ratings.Remove(t.FilePath);
             else ratings[t.FilePath] = value;
@@ -2564,7 +2802,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             }
             catch
             {
-                // повреждённый файл: начинаем без оценок
+                // пошкоджений файл: починаємо без оцінок
             }
         }
 
@@ -2581,7 +2819,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             }
         }
 
-        // ==================== Свои пресеты ====================
+        // ==================== Власні пресети ====================
         private void LoadCustomPresets()
         {
             customPresets.Clear();
@@ -2620,7 +2858,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             }
             catch
             {
-                // повреждённый файл: начинаем без своих пресетов
+                // пошкоджений файл: починаємо без власних пресетів
             }
         }
 
@@ -2719,7 +2957,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             SaveEqualizerSettings();
         }
 
-        // ==================== Скорость воспроизведения ====================
+        // ==================== Швидкість відтворення ====================
         private void BuildSpeedButton()
         {
             speedButton = new RoundButton
@@ -2830,13 +3068,13 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
                 "Онлайн-музика: клік відкриває, правий клік вибирає сервіс");
         }
 
-        // YouTube Music открыт или в нём сейчас играет звук
+        // Онлайн-сервіс відкритий або в ньому зараз грає звук
         private bool IsOnlineActive =>
             onlineOpen ||
             (webView?.CoreWebView2 != null && webView.CoreWebView2.IsDocumentPlayingAudio);
 
 
-        // Сворачивание в панель задач: сначала сжимаем веб-вид, чтобы звук не прерывался
+        // Згортання на панель завдань: спочатку стискаємо веб-вигляд, щоб звук не переривався
         private void MinimizeKeepingAudio()
         {
             reopenOnlineAfterRestore = onlineOpen;
@@ -2851,7 +3089,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
 
             bool wide = onlineService != OnlineService.YouTubeMusic;
 
-            // Сначала Anchor, потом размер, чтобы форма не растягивала веб-вид
+            // Спочатку Anchor, потім розмір, щоб форма не розтягувала веб-вигляд
             webView.Anchor = AnchorStyles.Top | AnchorStyles.Left;
 
             if (show)
@@ -2863,7 +3101,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
                 {
                     onlineScroll.Minimum = 0;
                     onlineScroll.LargeChange = ClientSize.Width;
-                    onlineScroll.Maximum = OnlineWideWidth - 1;   // макс. значение = ширина страницы - ширина окна
+                    onlineScroll.Maximum = OnlineWideWidth - 1;   // макс. значення = ширина сторінки - ширина вікна
                     onlineScroll.Location = new Point(0, ClientSize.Height - sbH);
                     onlineScroll.Size = new Size(ClientSize.Width, sbH);
                     onlineScroll.Visible = true;
@@ -2922,20 +3160,17 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
 
             if (created)
             {
-                if (!await CreateWebViewAsync()) return;   // сам откроет нужный адрес
+                if (!await CreateWebViewAsync()) return;   // сам відкриє потрібну адресу
             }
             else if (changed)
             {
                 ApplyServiceSettings(webView.CoreWebView2);
                 webView.CoreWebView2.Navigate(ServiceUrl(s));
 
-                if (onlineOpen) SetOnlineVisible(true);   // пересчитать ширину и полосу прокрутки
-
-
+                if (onlineOpen) SetOnlineVisible(true);   // перерахувати ширину та смугу прокрутки
             }
 
             if (!onlineOpen) await ToggleOnlineAsync();
-
         }
 
         private async Task ToggleOnlineAsync()
@@ -2943,7 +3178,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             if (webView == null && !await CreateWebViewAsync())
                 return;
 
-            // Из мини-формы сначала возвращаем обычное окно
+            // З міні-форми спочатку повертаємо звичайне вікно
             if (isCustomSize) RestoreWindow();
 
             bool open = !onlineOpen;
@@ -3010,7 +3245,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
                 ApplyServiceSettings(core);
                 core.Settings.AreDefaultContextMenusEnabled = false;
 
-                // Новые окна и всплывающие ссылки открываем в том же окне
+                // Нові вікна та спливні посилання відкриваємо в тому самому вікні
                 core.NewWindowRequested += (s, e) =>
                 {
                     e.Handled = true;
@@ -3036,7 +3271,7 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             }
         }
 
-        // Выход из аккаунта: удаляем cookies и данные сайтов в профиле
+        // Вихід з акаунта: видаляємо cookies та дані сайтів у профілі
         private async Task SignOutOnlineAsync()
         {
             if (webView?.CoreWebView2 == null)
@@ -3062,5 +3297,404 @@ $"Speed={speed.ToString("0.00", CultureInfo.InvariantCulture)}"
             }
         }
 
+
+        // ==================== Додаткові аудіоефекти AUREON ====================
+        // Три крутилки EQ та налаштування додаткових аудіоефектів.
+        private RotaryKnobControl bassBoostKnob;
+        private RotaryKnobControl virtualizerKnob;
+        private RotaryKnobControl subBassKnob;
+
+        private float bassBoostDb;
+        private float virtualizerPercent;
+        private float subBassDb;
+
+        // Максимальний рівень гучності: 100, 125 або 150 відсотків.
+        private int volumeLimit = 100;
+        private int savedVolumePercent = 100;
+        private ContextMenuStrip volumeLimitMenu;
+
+        private static readonly string AudioEnhancementSettingsPath =
+            Path.Combine(AppContext.BaseDirectory, "equalizer", "audio-effects.cfg");
+
+        /// <summary>
+        /// Додає три крутилки до наявної панелі EQ.
+        /// Викликається з конструктора після LayoutEqPanel().
+        /// </summary>
+        private void BuildAudioEnhancementsUi()
+        {
+            eqPanel.SuspendLayout();
+            try
+            {
+                // Панель EQ стає вищою на 54 px. Щоб вікно не стало
+                // помітно вищим, звільняємо майже стільки ж місця за рахунок
+                // порожньої області плейлиста та зсуву нижнього ряду керування.
+                int oldPanelHeight = eqPanel.Height;
+
+                equalizerView.Location = new Point(4, 32);
+                equalizerView.Size = new Size(
+                    Math.Max(100, eqPanel.ClientSize.Width - 8), 76);
+
+                const int knobTop = 111;
+                const int knobHeight = 70;
+                const int sideMargin = 4;
+                int slotWidth = Math.Max(70,
+                    (eqPanel.ClientSize.Width - sideMargin * 2) / 3);
+
+                // Підписи крутилок: БАС, ПРОСТІР (віртуалайзер), СУББАС
+                bassBoostKnob = CreateEffectsKnob(
+                    "БАС", " дБ", 0, 12, 0,
+                    new Point(sideMargin, knobTop),
+                    new Size(slotWidth, knobHeight));
+
+                virtualizerKnob = CreateEffectsKnob(
+                    "ПРОСТІР", "%", 0, 100, 0,
+                    new Point(sideMargin + slotWidth, knobTop),
+                    new Size(slotWidth, knobHeight));
+
+                subBassKnob = CreateEffectsKnob(
+                    "СУББАС", " дБ", 0, 12, 0,
+                    new Point(sideMargin + slotWidth * 2, knobTop),
+                    new Size(slotWidth, knobHeight));
+
+                bassBoostKnob.ValueChanged += (s, e) =>
+                {
+                    bassBoostDb = bassBoostKnob.Value;
+                    ApplyAudioEnhancementValues();
+                };
+                bassBoostKnob.ValueChangeCompleted += (s, e) => SaveAudioEnhancementSettings();
+
+                virtualizerKnob.ValueChanged += (s, e) =>
+                {
+                    virtualizerPercent = virtualizerKnob.Value;
+                    ApplyAudioEnhancementValues();
+                };
+                virtualizerKnob.ValueChangeCompleted += (s, e) => SaveAudioEnhancementSettings();
+
+                subBassKnob.ValueChanged += (s, e) =>
+                {
+                    subBassDb = subBassKnob.Value;
+                    ApplyAudioEnhancementValues();
+                };
+                subBassKnob.ValueChangeCompleted += (s, e) => SaveAudioEnhancementSettings();
+
+                eqPanel.Controls.Add(bassBoostKnob);
+                eqPanel.Controls.Add(virtualizerKnob);
+                eqPanel.Controls.Add(subBassKnob);
+
+                // Підсумкова висота: шапка + десять смуг + три крутилки.
+                eqPanel.Height = knobTop + knobHeight + 5;
+
+                int panelGrowth = Math.Max(0, eqPanel.Height - oldPanelHeight);
+                int reduction = Math.Min(Math.Max(0, panelGrowth - 8),
+                    Math.Max(0, ListPlayer.Height - 100));
+
+                if (reduction > 0)
+                {
+                    MinimumSize = new Size(MinimumSize.Width, Math.Max(0, MinimumSize.Height - reduction));
+                    ClientSize = new Size(ClientSize.Width, ClientSize.Height - reduction);
+                    if (MaximumSize.Height > 0)
+                    {
+                        MaximumSize = new Size(MaximumSize.Width, Math.Max(ClientSize.Height, MaximumSize.Height - reduction));
+                    }
+                    ListPlayer.Height -= reduction; // <-- ОШИБКА: ломает привязки (Anchor)
+
+                    Control[] lowerControls =
+                    {
+        searchBox, speedButton, repeatTrack, noRepeatTrack,
+        yesshuffleTrack, nosshuffleTrack, AddPlayList, DeletePlayList
+    };
+
+                    foreach (Control control in lowerControls)
+                    {
+                        if (control != null) control.Top -= reduction; // <-- ОШИБКА: сдвигает кнопки вверх, создавая дыру
+                    }
+                    originalSize = Size;
+                }
+
+                toolTip.SetToolTip(bassBoostKnob,
+                    "Бас: підсилення басу близько 110 Гц. Потягніть вгору/вниз або скористайтеся колесом миші.");
+                toolTip.SetToolTip(virtualizerKnob,
+                    "Простір: розширення стереобази. Для моно-файлів ефект не чутно.");
+                toolTip.SetToolTip(subBassKnob,
+                    "Суббас: підсилення найнижчих частот близько 45 Гц.");
+            }
+            finally
+            {
+                eqPanel.ResumeLayout(true);
+            }
+
+            UpdateAudioEnhancementsEnabled();
+        }
+
+        private RotaryKnobControl CreateEffectsKnob(
+            string caption, string unit, int min, int max, int initial,
+            Point location, Size size)
+        {
+            var knob = new RotaryKnobControl
+            {
+                Caption = caption,
+                Unit = unit,
+                Minimum = min,
+                Maximum = max,
+                Value = initial,
+                Location = location,
+                Size = size,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left
+            };
+
+            return knob;
+        }
+
+        /// <summary>Готує ModernSlider до шкали реальних відсотків 0–100.</summary>
+        private void InitializeVolumeControl()
+        {
+            Volume.Minimum = 0;
+            Volume.Maximum = 100;
+            Volume.Value = 100;
+
+            volumeLimit = 100;
+            volumeLimitMenu = new ContextMenuStrip
+            {
+                Renderer = new DarkMenuRenderer(),
+                Font = new Font("Segoe UI", 9.5f),
+                ShowImageMargin = false
+            };
+
+            foreach (int limit in new[] { 100, 125, 150 })
+            {
+                int value = limit;
+                var item = new ToolStripMenuItem($"Максимум {value}%")
+                {
+                    Tag = value,
+                    CheckOnClick = false
+                };
+                item.Click += (s, e) => SetVolumeLimit(value);
+                volumeLimitMenu.Items.Add(item);
+            }
+
+            volumeLimitMenu.Opening += (s, e) =>
+            {
+                foreach (ToolStripMenuItem item in volumeLimitMenu.Items)
+                    item.Checked = (int)item.Tag == volumeLimit;
+            };
+
+            // Правий клік по самому повзунку відкриває меню ліміту.
+            Volume.ContextMenuStrip = volumeLimitMenu;
+
+            // Клік по значку динаміка — альтернативний спосіб відкрити це меню.
+            VolumeLabel.Cursor = Cursors.Hand;
+            VolumeLabel.Click += (s, e) =>
+            {
+                volumeLimitMenu.Show(VolumeLabel,
+                    new Point(0, VolumeLabel.Height), ToolStripDropDownDirection.BelowRight);
+            };
+
+            UpdateVolumeToolTip();
+        }
+
+        private void SetVolumeLimit(int limit, bool save = true)
+        {
+            if (limit != 100 && limit != 125 && limit != 150)
+                limit = 100;
+
+            int currentValue = Volume.Value;
+            volumeLimit = limit;
+            Volume.Maximum = limit;
+            Volume.Value = Math.Min(currentValue, limit);
+
+            if (masterVolume != null)
+                masterVolume.Volume = CurrentVolume() * GetFadeFactor();
+
+            UpdateVolumeToolTip();
+
+            if (save)
+                SaveAudioEnhancementSettings();
+        }
+
+        private void UpdateVolumeToolTip()
+        {
+            string text = $"Гучність: {Volume.Value}% (максимум {volumeLimit}%). Правий клік — змінити межу.";
+            toolTip?.SetToolTip(Volume, text);
+            toolTip?.SetToolTip(VolumeLabel, text);
+        }
+
+        private void LoadAudioEnhancementSettings()
+        {
+            try
+            {
+                if (File.Exists(AudioEnhancementSettingsPath))
+                {
+                    foreach (string line in File.ReadLines(AudioEnhancementSettingsPath))
+                    {
+                        int separator = line.IndexOf('=');
+                        if (separator <= 0) continue;
+
+                        string key = line.Substring(0, separator).Trim();
+                        string raw = line.Substring(separator + 1).Trim();
+
+                        switch (key)
+                        {
+                            case "BassBoost":
+                                if (float.TryParse(raw, NumberStyles.Float,
+                                    CultureInfo.InvariantCulture, out float bass))
+                                    bassBoostDb = Math.Clamp(bass, 0f, 12f);
+                                break;
+
+                            case "Virtualizer":
+                                if (float.TryParse(raw, NumberStyles.Float,
+                                    CultureInfo.InvariantCulture, out float virt))
+                                    virtualizerPercent = Math.Clamp(virt, 0f, 100f);
+                                break;
+
+                            case "SubBass":
+                                if (float.TryParse(raw, NumberStyles.Float,
+                                    CultureInfo.InvariantCulture, out float sub))
+                                    subBassDb = Math.Clamp(sub, 0f, 12f);
+                                break;
+
+                            case "VolumeLimit":
+                                if (int.TryParse(raw, out int limit) &&
+                                    (limit == 100 || limit == 125 || limit == 150))
+                                    volumeLimit = limit;
+                                break;
+
+                            case "VolumePercent":
+                                if (int.TryParse(raw, out int percent))
+                                    savedVolumePercent = Math.Clamp(percent, 0, 150);
+                                break;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Пошкоджений файл налаштувань не заважає запуску плеєра.
+            }
+
+            bassBoostKnob?.SetValue((int)Math.Round(bassBoostDb), false);
+            virtualizerKnob?.SetValue((int)Math.Round(virtualizerPercent), false);
+            subBassKnob?.SetValue((int)Math.Round(subBassDb), false);
+
+            SetVolumeLimit(volumeLimit, save: false);
+            Volume.Value = Math.Min(savedVolumePercent, volumeLimit);
+            UpdateVolumeToolTip();
+            ApplyAudioEnhancementValues();
+        }
+
+        private void SaveAudioEnhancementSettings()
+        {
+            try
+            {
+                string directory = Path.GetDirectoryName(AudioEnhancementSettingsPath);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+
+                File.WriteAllLines(AudioEnhancementSettingsPath, new[]
+                {
+                    "BassBoost=" + bassBoostDb.ToString("0", CultureInfo.InvariantCulture),
+                    "Virtualizer=" + virtualizerPercent.ToString("0", CultureInfo.InvariantCulture),
+                    "SubBass=" + subBassDb.ToString("0", CultureInfo.InvariantCulture),
+                    "VolumeLimit=" + volumeLimit.ToString(CultureInfo.InvariantCulture),
+                    "VolumePercent=" + Volume.Value.ToString(CultureInfo.InvariantCulture)
+                });
+            }
+            catch
+            {
+                // Налаштування ефектів необов'язкові; помилка запису не зупиняє плеєр.
+            }
+        }
+
+        private void ApplyAudioEnhancementValues()
+        {
+            if (audioEffects == null) return;
+
+            audioEffects.BassBoostDb = bassBoostDb;
+            audioEffects.Virtualizer = virtualizerPercent;
+            audioEffects.SubBassDb = subBassDb;
+        }
+
+        private void UpdateAudioEnhancementsEnabled()
+        {
+            if (audioEffects != null)
+                audioEffects.Enabled = eqEnabled;
+
+            if (bassBoostKnob != null) bassBoostKnob.Enabled = eqEnabled;
+            if (virtualizerKnob != null) virtualizerKnob.Enabled = eqEnabled;
+            if (subBassKnob != null) subBassKnob.Enabled = eqEnabled;
+        }
+
+        // ==================== NamedPipe Server для приема файлов ====================
+        private Thread _pipeServerThread;
+        private CancellationTokenSource _pipeServerCts;
+
+        private async void StartPipeServer()
+        {
+            _pipeServerCts = new CancellationTokenSource();
+
+            while (!_pipeServerCts.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    using var server = new NamedPipeServerStream(
+                        Program.PipeName,
+                        PipeDirection.In,
+                        1,
+                        PipeTransmissionMode.Byte,
+                        PipeOptions.Asynchronous);
+
+                    // Асинхронно ждем подключения клиента
+                    await server.WaitForConnectionAsync(_pipeServerCts.Token);
+
+                    using var reader = new StreamReader(server);
+                    string json = await reader.ReadLineAsync();
+
+                    if (!string.IsNullOrEmpty(json))
+                    {
+                        var files = JsonSerializer.Deserialize<string[]>(json);
+
+                        if (files != null && files.Length > 0)
+                        {
+                            // Вызываем добавление файлов в UI-потоке
+                            BeginInvoke(new Action(() =>
+                            {
+                                AddFilesToViewList(files);
+                                SavePlaylist(viewList);
+
+                                // Если музыка не играет, запускаем первый добавленный файл
+                                if (waveOutDevice == null && viewList.Tracks.Count > 0)
+                                {
+                                    int index = viewList.Tracks.Count - files.Length;
+                                    if (index < 0) index = 0;
+                                    SelectAndPlay(index);
+                                }
+
+                                // Разворачиваем окно, если оно было свернуто
+                                if (WindowState == FormWindowState.Minimized)
+                                    WindowState = FormWindowState.Normal;
+
+                                Activate();
+                            }));
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Сервер остановлен
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"AUREON Pipe Server Error: {ex.Message}");
+                    await Task.Delay(500); // Пауза перед повторной попыткой
+                }
+            }
+        }
+
+        // Останавливаем сервер при закрытии формы
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            _pipeServerCts?.Cancel();
+            base.OnFormClosing(e);
+        }
     }
 }

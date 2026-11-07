@@ -68,6 +68,7 @@
             // 
             // BackButton
             // 
+            BackButton.BackColor = Color.Transparent;
             BackButton.Font = new Font("Segoe MDL2 Assets", 13F);
             BackButton.ForeColor = Color.FromArgb(235, 235, 238);
             BackButton.Kind = ButtonKind.Soft;
@@ -76,12 +77,14 @@
             BackButton.Radius = 14;
             BackButton.Size = new Size(43, 34);
             BackButton.TabIndex = 2;
+            BackButton.TabStop = false;
             BackButton.Text = "";
             toolTip.SetToolTip(BackButton, "Попередній трек");
             BackButton.Click += BackButton_Click;
             // 
             // PauseButton
             // 
+            PauseButton.BackColor = Color.Transparent;
             PauseButton.Font = new Font("Segoe MDL2 Assets", 16F);
             PauseButton.ForeColor = Color.White;
             PauseButton.Kind = ButtonKind.Accent;
@@ -90,12 +93,14 @@
             PauseButton.Radius = 24;
             PauseButton.Size = new Size(43, 34);
             PauseButton.TabIndex = 3;
+            PauseButton.TabStop = false;
             PauseButton.Text = "";
             toolTip.SetToolTip(PauseButton, "Пауза / відтворення");
             PauseButton.Click += PauseButton_Click;
             // 
             // ForwardButton
             // 
+            ForwardButton.BackColor = Color.Transparent;
             ForwardButton.Font = new Font("Segoe MDL2 Assets", 13F);
             ForwardButton.ForeColor = Color.FromArgb(235, 235, 238);
             ForwardButton.Kind = ButtonKind.Soft;
@@ -104,12 +109,14 @@
             ForwardButton.Radius = 14;
             ForwardButton.Size = new Size(43, 34);
             ForwardButton.TabIndex = 4;
+            ForwardButton.TabStop = false;
             ForwardButton.Text = "";
             toolTip.SetToolTip(ForwardButton, "Наступний трек");
             ForwardButton.Click += ForwardButton_Click;
             // 
             // StopButton
             // 
+            StopButton.BackColor = Color.Transparent;
             StopButton.Font = new Font("Segoe MDL2 Assets", 13F);
             StopButton.ForeColor = Color.FromArgb(235, 235, 238);
             StopButton.Kind = ButtonKind.Soft;
@@ -118,6 +125,7 @@
             StopButton.Radius = 14;
             StopButton.Size = new Size(43, 34);
             StopButton.TabIndex = 5;
+            StopButton.TabStop = false;
             StopButton.Text = "";
             toolTip.SetToolTip(StopButton, "Зупинити");
             StopButton.Click += StopButton_Click;
@@ -172,19 +180,19 @@
             contextMenuStripListPlayer.Items.AddRange(new ToolStripItem[] { добавитьПлейлистToolStripMenuItem, очиститьПлейлистToolStripMenuItem });
             contextMenuStripListPlayer.Name = "contextMenuStripListPlayer";
             contextMenuStripListPlayer.ShowImageMargin = false;
-            contextMenuStripListPlayer.Size = new Size(167, 48);
+            contextMenuStripListPlayer.Size = new Size(163, 48);
             // 
             // добавитьПлейлистToolStripMenuItem
             // 
             добавитьПлейлистToolStripMenuItem.Name = "добавитьПлейлистToolStripMenuItem";
-            добавитьПлейлистToolStripMenuItem.Size = new Size(166, 22);
+            добавитьПлейлистToolStripMenuItem.Size = new Size(162, 22);
             добавитьПлейлистToolStripMenuItem.Text = "Додати плейлист";
             добавитьПлейлистToolStripMenuItem.Click += добавитьПлейлистToolStripMenuItem_Click;
             // 
             // очиститьПлейлистToolStripMenuItem
             // 
             очиститьПлейлистToolStripMenuItem.Name = "очиститьПлейлистToolStripMenuItem";
-            очиститьПлейлистToolStripMenuItem.Size = new Size(166, 22);
+            очиститьПлейлистToolStripMenuItem.Size = new Size(162, 22);
             очиститьПлейлистToolStripMenuItem.Text = "Видалити плейлист";
             очиститьПлейлистToolStripMenuItem.Click += очиститьПлейлистToolStripMenuItem_Click;
             // 
@@ -200,20 +208,24 @@
             // 
             // Volume
             // 
+            Volume.BackColor = Color.Transparent;
             Volume.Location = new Point(235, 244);
             Volume.Maximum = 1000;
             Volume.Name = "Volume";
             Volume.Size = new Size(105, 21);
             Volume.TabIndex = 11;
+            Volume.TabStop = false;
             Volume.Value = 1000;
             Volume.Scroll += trackBar1_Scroll;
             // 
             // progressBarMusic
             // 
+            progressBarMusic.BackColor = Color.Transparent;
             progressBarMusic.Location = new Point(75, 281);
             progressBarMusic.Name = "progressBarMusic";
             progressBarMusic.Size = new Size(265, 21);
             progressBarMusic.TabIndex = 12;
+            progressBarMusic.TabStop = false;
             progressBarMusic.Scroll += progressBarMusic_Scroll;
             progressBarMusic.MouseDown += progressBarMusic_MouseDown;
             progressBarMusic.MouseUp += progressBarMusic_MouseUp;
@@ -243,24 +255,28 @@
             // 
             // repeatTrack
             // 
+            repeatTrack.BackColor = Color.Transparent;
             repeatTrack.Font = new Font("Segoe MDL2 Assets", 13F);
             repeatTrack.ForeColor = Color.FromArgb(200, 200, 208);
             repeatTrack.Location = new Point(8, 551);
             repeatTrack.Name = "repeatTrack";
             repeatTrack.Size = new Size(43, 31);
             repeatTrack.TabIndex = 15;
+            repeatTrack.TabStop = false;
             repeatTrack.Text = "";
             toolTip.SetToolTip(repeatTrack, "Повторювати трек");
             repeatTrack.Click += repeatTrack_Click;
             // 
             // noRepeatTrack
             // 
+            noRepeatTrack.BackColor = Color.Transparent;
             noRepeatTrack.Font = new Font("Segoe MDL2 Assets", 13F);
             noRepeatTrack.ForeColor = Color.FromArgb(76, 160, 255);
             noRepeatTrack.Location = new Point(8, 551);
             noRepeatTrack.Name = "noRepeatTrack";
             noRepeatTrack.Size = new Size(43, 31);
             noRepeatTrack.TabIndex = 16;
+            noRepeatTrack.TabStop = false;
             noRepeatTrack.Text = "";
             toolTip.SetToolTip(noRepeatTrack, "Вимкнути повтор");
             noRepeatTrack.Visible = false;
@@ -268,48 +284,56 @@
             // 
             // AddPlayList
             // 
+            AddPlayList.BackColor = Color.Transparent;
             AddPlayList.Font = new Font("Segoe MDL2 Assets", 13F);
             AddPlayList.ForeColor = Color.FromArgb(200, 200, 208);
             AddPlayList.Location = new Point(251, 551);
             AddPlayList.Name = "AddPlayList";
             AddPlayList.Size = new Size(43, 31);
             AddPlayList.TabIndex = 18;
+            AddPlayList.TabStop = false;
             AddPlayList.Text = "";
             toolTip.SetToolTip(AddPlayList, "Додати плейлист");
             AddPlayList.Click += AddPlayList_Click;
             // 
             // DeletePlayList
             // 
+            DeletePlayList.BackColor = Color.Transparent;
             DeletePlayList.Font = new Font("Segoe MDL2 Assets", 13F);
             DeletePlayList.ForeColor = Color.FromArgb(200, 200, 208);
             DeletePlayList.Location = new Point(300, 551);
             DeletePlayList.Name = "DeletePlayList";
             DeletePlayList.Size = new Size(43, 31);
             DeletePlayList.TabIndex = 19;
+            DeletePlayList.TabStop = false;
             DeletePlayList.Text = "";
             toolTip.SetToolTip(DeletePlayList, "Очистити плейлист");
             DeletePlayList.Click += DeletePlayList_Click;
             // 
             // yesshuffleTrack
             // 
+            yesshuffleTrack.BackColor = Color.Transparent;
             yesshuffleTrack.Font = new Font("Segoe MDL2 Assets", 13F);
             yesshuffleTrack.ForeColor = Color.FromArgb(200, 200, 208);
             yesshuffleTrack.Location = new Point(57, 551);
             yesshuffleTrack.Name = "yesshuffleTrack";
             yesshuffleTrack.Size = new Size(43, 31);
             yesshuffleTrack.TabIndex = 20;
+            yesshuffleTrack.TabStop = false;
             yesshuffleTrack.Text = "";
             toolTip.SetToolTip(yesshuffleTrack, "Увімкнути випадкове відтворення");
             yesshuffleTrack.Click += yesshuffleTrack_Click;
             // 
             // nosshuffleTrack
             // 
+            nosshuffleTrack.BackColor = Color.Transparent;
             nosshuffleTrack.Font = new Font("Segoe MDL2 Assets", 13F);
             nosshuffleTrack.ForeColor = Color.FromArgb(76, 160, 255);
             nosshuffleTrack.Location = new Point(57, 551);
             nosshuffleTrack.Name = "nosshuffleTrack";
             nosshuffleTrack.Size = new Size(43, 31);
             nosshuffleTrack.TabIndex = 21;
+            nosshuffleTrack.TabStop = false;
             nosshuffleTrack.Text = "";
             toolTip.SetToolTip(nosshuffleTrack, "Вимкнути випадкове відтворення");
             nosshuffleTrack.Visible = false;
@@ -326,20 +350,22 @@
             // 
             // eqButton
             // 
+            eqButton.BackColor = Color.Transparent;
             eqButton.Font = new Font("Segoe UI Semibold", 9.5F);
             eqButton.ForeColor = Color.FromArgb(235, 235, 238);
             eqButton.Kind = ButtonKind.Soft;
             eqButton.Location = new Point(300, 330);
             eqButton.Name = "eqButton";
-            eqButton.Radius = 10;
             eqButton.Size = new Size(42, 44);
             eqButton.TabIndex = 23;
+            eqButton.TabStop = false;
             eqButton.Text = "EQ";
             toolTip.SetToolTip(eqButton, "Еквалайзер (Ctrl+E)");
             eqButton.Click += eqButton_Click;
             // 
             // eqPresetButton
             // 
+            eqPresetButton.BackColor = Color.Transparent;
             eqPresetButton.Font = new Font("Segoe UI", 9F);
             eqPresetButton.ForeColor = Color.FromArgb(235, 235, 238);
             eqPresetButton.Kind = ButtonKind.Soft;
@@ -348,12 +374,14 @@
             eqPresetButton.Radius = 8;
             eqPresetButton.Size = new Size(84, 23);
             eqPresetButton.TabIndex = 0;
+            eqPresetButton.TabStop = false;
             eqPresetButton.Text = "Плоский  ▾";
             toolTip.SetToolTip(eqPresetButton, "Вибрати пресет");
             eqPresetButton.Click += eqPresetButton_Click;
             // 
             // eqToggleButton
             // 
+            eqToggleButton.BackColor = Color.Transparent;
             eqToggleButton.Font = new Font("Segoe UI Semibold", 9F);
             eqToggleButton.ForeColor = Color.White;
             eqToggleButton.Kind = ButtonKind.Accent;
@@ -362,6 +390,7 @@
             eqToggleButton.Radius = 8;
             eqToggleButton.Size = new Size(87, 23);
             eqToggleButton.TabIndex = 1;
+            eqToggleButton.TabStop = false;
             eqToggleButton.Text = "Увімк.";
             toolTip.SetToolTip(eqToggleButton, "Увімкнути / вимкнути еквалайзер");
             eqToggleButton.Click += eqToggleButton_Click;
@@ -380,6 +409,7 @@
             // 
             // equalizerView
             // 
+            equalizerView.BackColor = Color.Transparent;
             equalizerView.Location = new Point(4, 32);
             equalizerView.Name = "equalizerView";
             equalizerView.Size = new Size(326, 97);
@@ -432,6 +462,7 @@
             eqPanel.ResumeLayout(false);
             ResumeLayout(false);
             PerformLayout();
+
         }
 
         #endregion
