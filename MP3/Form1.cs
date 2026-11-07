@@ -491,10 +491,8 @@ namespace MP3
             {
                 // Звичайний запуск: відтворюємо перший трек плейлиста.
                 SelectAndPlay(0);
-            }
-
-            _lastClientHeight = ClientSize.Height;
-            _listPlayerBaseTop = ListPlayer.Top;
+        }
+        
 
             SyncPlaylistToFormHeight();
             ClampFormToScreen();
@@ -1273,14 +1271,11 @@ namespace MP3
                 return 1f;
 
             double elapsed = audioFileReader.CurrentTime.TotalSeconds;
-            double remaining = total - elapsed;
-
-            // Плавна S-крива (cosine), без лінійних «сходинок»
-            static float Smooth(double t)
-            {
-                t = Math.Clamp(t, 0.0, 1.0);
-                return (float)(0.5 - 0.5 * Math.Cos(t * Math.PI));
-            }
+            double remaining = (audioFileReader.TotalTime - audioFileReader.CurrentTime).TotalSeconds;
+            double fadeIn = Math.Clamp(elapsed / FadeDurationSeconds, 0.0, 1.0);
+            double fadeOut = Math.Clamp(remaining / FadeDurationSeconds, 0.0, 1.0);
+            return (float)Math.Min(fadeIn, fadeOut);
+        }
 
             float fadeIn = Smooth(elapsed / fade);
             float fadeOut = Smooth(remaining / fade);
@@ -1326,9 +1321,7 @@ namespace MP3
                 equalizer.SetAllGains(eqGains, immediate: true);
                 equalizer.Enabled = eqEnabled;
 
-                // Додаткові ефекти йдуть після 10-смугового EQ,
-                // тому стандартні пресети та ручні смуги не змінюються.
-                audioEffects = new AudioEffectsSampleProvider(equalizer)
+                balanceProvider = new BalanceSampleProvider(equalizer)
                 {
                     BassBoostDb = bassBoostDb,
                     Virtualizer = virtualizerPercent,
@@ -1693,41 +1686,21 @@ namespace MP3
 
             if (open)
             {
-                // 1. ЗАПОМИНАЕМ текущую высоту окна (когда EQ был закрыт)
-                _heightBeforeEq = Height;
-
-                // 2. Пытаемся увеличить окно на высоту EQ
-                int targetH = Math.Min(Height + delta, maxH);
-                int applied = targetH - Height;
-
-                MaximumSize = new Size(MaximumSize.Width, maxH);
-
-                // Временно снимаем ограничение MinimumSize, чтобы окно могло расти
-                int oldMinHeight = MinimumSize.Height;
-                MinimumSize = new Size(MinimumSize.Width, 0);
-
-                Height = targetH;
-
-                // 3. Возвращаем MinimumSize, но уже с учетом высоты EQ
-                MinimumSize = new Size(MinimumSize.Width, oldMinHeight + delta);
-
-                // 4. Позиционируем EQ и плейлист
-                int shortfall = delta - applied;
-                if (shortfall > 0)
-                {
-                    ListPlayer.Top += shortfall;
-                    eqPanel.Top = ListPlayer.Top - EqGap - eqPanel.Height;
-                }
-                else
-                {
-                    eqPanel.Top = playlistTabs.Bottom + EqGap;
-                    ListPlayer.Top = eqPanel.Bottom + EqGap;
-                }
+                MaximumSize = new Size(MaximumSize.Width, MaximumSize.Height + delta);
+                ClientSize = new Size(ClientSize.Width, ClientSize.Height + delta);
             }
             else
             {
-                // Закрываем EQ
-                ListPlayer.Top = playlistTabs.Bottom + EqGap;
+                ClientSize = new Size(ClientSize.Width, ClientSize.Height + delta);
+                MaximumSize = new Size(MaximumSize.Width, MaximumSize.Height + delta);
+            }
+
+            Control[] below =
+            {
+                playlistTabs, ListPlayer, searchBox, speedButton,
+                repeatTrack, noRepeatTrack, yesshuffleTrack, nosshuffleTrack,
+                AddPlayList, DeletePlayList
+            };
 
                 // Временно снимаем ограничение, чтобы окно могло сжаться
                 int currentMinH = MinimumSize.Height;
@@ -3295,6 +3268,146 @@ namespace MP3
             {
                 MessageBox.Show("Не вдалося очистити дані: " + ex.Message);
             }
+        }
+
+
+        // ==================== Додаткові аудіоефекти AUREON ====================
+        // Три крутилки EQ та налаштування додаткових аудіоефектів.
+        private RotaryKnobControl bassBoostKnob;
+        private RotaryKnobControl virtualizerKnob;
+        private RotaryKnobControl subBassKnob;
+
+        private float bassBoostDb;
+        private float virtualizerPercent;
+        private float subBassDb;
+
+        // Максимальний рівень гучності: 100, 125 або 150 відсотків.
+        private int volumeLimit = 100;
+        private int savedVolumePercent = 100;
+        private ContextMenuStrip volumeLimitMenu;
+
+        private static readonly string AudioEnhancementSettingsPath =
+            Path.Combine(AppContext.BaseDirectory, "equalizer", "audio-effects.cfg");
+
+        /// <summary>
+        /// Додає три крутилки до наявної панелі EQ.
+        /// Викликається з конструктора після LayoutEqPanel().
+        /// </summary>
+        private void BuildAudioEnhancementsUi()
+        {
+            eqPanel.SuspendLayout();
+            try
+            {
+                // Панель EQ стає вищою на 54 px. Щоб вікно не стало
+                // помітно вищим, звільняємо майже стільки ж місця за рахунок
+                // порожньої області плейлиста та зсуву нижнього ряду керування.
+                int oldPanelHeight = eqPanel.Height;
+
+                equalizerView.Location = new Point(4, 32);
+                equalizerView.Size = new Size(
+                    Math.Max(100, eqPanel.ClientSize.Width - 8), 76);
+
+                const int knobTop = 111;
+                const int knobHeight = 70;
+                const int sideMargin = 4;
+                int slotWidth = Math.Max(70,
+                    (eqPanel.ClientSize.Width - sideMargin * 2) / 3);
+
+                // Підписи крутилок: БАС, ПРОСТІР (віртуалайзер), СУББАС
+                bassBoostKnob = CreateEffectsKnob(
+                    "БАС", " дБ", 0, 12, 0,
+                    new Point(sideMargin, knobTop),
+                    new Size(slotWidth, knobHeight));
+
+                virtualizerKnob = CreateEffectsKnob(
+                    "ПРОСТІР", "%", 0, 100, 0,
+                    new Point(sideMargin + slotWidth, knobTop),
+                    new Size(slotWidth, knobHeight));
+
+                subBassKnob = CreateEffectsKnob(
+                    "СУББАС", " дБ", 0, 12, 0,
+                    new Point(sideMargin + slotWidth * 2, knobTop),
+                    new Size(slotWidth, knobHeight));
+
+                bassBoostKnob.ValueChanged += (s, e) =>
+                {
+                    bassBoostDb = bassBoostKnob.Value;
+                    ApplyAudioEnhancementValues();
+                };
+                bassBoostKnob.ValueChangeCompleted += (s, e) => SaveAudioEnhancementSettings();
+
+                virtualizerKnob.ValueChanged += (s, e) =>
+                {
+                    virtualizerPercent = virtualizerKnob.Value;
+                    ApplyAudioEnhancementValues();
+                };
+                virtualizerKnob.ValueChangeCompleted += (s, e) => SaveAudioEnhancementSettings();
+
+                subBassKnob.ValueChanged += (s, e) =>
+                {
+                    subBassDb = subBassKnob.Value;
+                    ApplyAudioEnhancementValues();
+                };
+                subBassKnob.ValueChangeCompleted += (s, e) => SaveAudioEnhancementSettings();
+
+                eqPanel.Controls.Add(bassBoostKnob);
+                eqPanel.Controls.Add(virtualizerKnob);
+                eqPanel.Controls.Add(subBassKnob);
+
+                // Підсумкова висота: шапка + десять смуг + три крутилки.
+                eqPanel.Height = knobTop + knobHeight + 5;
+
+                int panelGrowth = Math.Max(0, eqPanel.Height - oldPanelHeight);
+                int reduction = Math.Min(Math.Max(0, panelGrowth - 8),
+                    Math.Max(0, ListPlayer.Height - 100));
+
+                if (reduction > 0)
+                {
+                    // Порядок важливий: спочатку знижуємо нижню межу (MinimumSize),
+                    // потім сам розмір вікна, потім верхню межу (MaximumSize).
+                    MinimumSize = new Size(MinimumSize.Width,
+                        Math.Max(0, MinimumSize.Height - reduction));
+
+                    ClientSize = new Size(ClientSize.Width, ClientSize.Height - reduction);
+
+                    if (MaximumSize.Height > 0)
+                    {
+                        MaximumSize = new Size(MaximumSize.Width,
+                            Math.Max(ClientSize.Height, MaximumSize.Height - reduction));
+                    }
+
+                    ListPlayer.Height -= reduction;
+
+                    Control[] lowerControls =
+                    {
+                        searchBox, speedButton,
+                        repeatTrack, noRepeatTrack,
+                        yesshuffleTrack, nosshuffleTrack,
+                        AddPlayList, DeletePlayList
+                    };
+
+                    foreach (Control control in lowerControls)
+                    {
+                        if (control != null)
+                            control.Top -= reduction;
+                    }
+
+                    originalSize = Size;
+                }
+
+                toolTip.SetToolTip(bassBoostKnob,
+                    "Бас: підсилення басу близько 110 Гц. Потягніть вгору/вниз або скористайтеся колесом миші.");
+                toolTip.SetToolTip(virtualizerKnob,
+                    "Простір: розширення стереобази. Для моно-файлів ефект не чутно.");
+                toolTip.SetToolTip(subBassKnob,
+                    "Суббас: підсилення найнижчих частот близько 45 Гц.");
+            }
+            finally
+            {
+                eqPanel.ResumeLayout(true);
+            }
+
+            UpdateAudioEnhancementsEnabled();
         }
 
 
