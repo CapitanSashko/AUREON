@@ -1,4 +1,4 @@
-# AUREON
+# AUREON Audio Player
 
 [English](README.md) | [Українська](README.uk.md)
 
