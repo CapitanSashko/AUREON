@@ -9,7 +9,7 @@
 
 **A modern Windows music player built with C# and .NET 8.**
 
-AUREON is a compact desktop player for your local music collection. It combines a 10-band equalizer with bass, stereo-width and sub-bass controls, pitch-preserving speed control, tabbed playlists, cover art, track notifications and built-in access to online music services. All of it lives in a dark, borderless window that collapses into a small mini-player when you need it out of the way.
+AUREON Audio Player is a compact desktop player for your local music collection. It combines a 10-band equalizer with bass, stereo-width and sub-bass controls, pitch-preserving speed control, tabbed playlists, cover art, track notifications and built-in access to online music services. All of it lives in a dark, borderless window that collapses into a small mini-player when you need it out of the way.
 
 ## Features
 
@@ -34,7 +34,7 @@ AUREON is a compact desktop player for your local music collection. It combines 
 - Instant search inside the current playlist.
 - Star ratings (1–5) for every track and total playlist duration.
 - Playlists, ratings and settings are saved automatically.
-- Open audio files with AUREON from Explorer: if it is set as the default player, files are added to the playlist.
+- Open audio files with AUREON Audio Player from Explorer: if it is set as the default player, files are added to the playlist.
 
 ### Interface
 - Custom dark window with rounded corners and a built-in title bar.
@@ -102,7 +102,7 @@ Download the latest version from [GitHub Releases](../../releases).
 4. Restore NuGet packages.
 5. Build the project using the **Release** configuration.
 
-## Where AUREON Stores Data
+## Where AUREON Audio Player Stores Data
 
 Settings are stored next to the executable, in plain text files:
 
